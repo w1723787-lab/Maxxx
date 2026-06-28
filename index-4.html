@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Чат</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: sans-serif; background: #0e0e12; color: #e8e8f0; height: 100vh; display: flex; flex-direction: column; }
+#setup { display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; gap: 16px; padding: 24px; }
+h1 { font-size: 24px; }
+input { width: 100%; max-width: 320px; padding: 14px; background: #18181f; border: 1.5px solid #2a2a36; border-radius: 12px; color: #e8e8f0; font-size: 16px; outline: none; }
+#btn1 { width: 100%; max-width: 320px; padding: 15px; background: #7c6af7; border: none; border-radius: 12px; color: white; font-size: 16px; font-weight: bold; cursor: pointer; }
+#chat { display: none; flex-direction: column; flex: 1; overflow: hidden; }
+#msgs { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 6px; }
+.bubble { max-width: 75%; padding: 10px 14px; border-radius: 16px; font-size: 15px; word-break: break-word; }
+.out { align-self: flex-end; background: #7c6af7; color: white; border-bottom-right-radius: 4px; }
+.in { align-self: flex-start; background: #22222c; border-bottom-left-radius: 4px; }
+.sys { align-self: center; font-size: 12px; color: #8888aa; background: #22222c; padding: 4px 12px; border-radius: 20px; }
+.name { font-size: 11px; color: #a99ef9; margin-bottom: 2px; }
+.img-bubble { max-width: 220px; border-radius: 14px; overflow: hidden; cursor: pointer; }
+.img-bubble img { width: 100%; display: block; }
+.bar { background: #18181f; border-top: 1px solid #2a2a36; padding: 8px 10px; display: flex; gap: 8px; align-items: flex-end; }
+textarea { flex: 1; background: #22222c; border: 1.5px solid #2a2a36; border-radius: 18px; padding: 10px 14px; color: #e8e8f0; font-size: 15px; outline: none; resize: none; max-height: 100px; font-family: sans-serif; }
+.ibtn { width: 44px; height: 44px; border-radius: 50%; background: #22222c; border: none; color: #e8e8f0; font-size: 20px; flex-shrink: 0; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+#btn2 { width: 44px; height: 44px; border-radius: 50%; background: #7c6af7; border: none; color: white; font-size: 20px; flex-shrink: 0; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+#lb { display: none; position: fixed; inset: 0; background: #000d; z-index: 100; align-items: center; justify-content: center; }
+#lb.open { display: flex; }
+#lb img { max-width: 95vw; max-height: 90vh; border-radius: 12px; }
+#lbx { position: absolute; top: 16px; right: 16px; background: rgba(0,0,0,.6); border: none; color: white; font-size: 22px; width: 38px; height: 38px; border-radius: 50%; cursor: pointer; }
+#fileIn { display: none; }
+</style>
+</head>
+<body>
+
+<div id="setup">
+  <h1>💬 Чат</h1>
+  <p style="color:#8888aa;text-align:center;font-size:14px">Введи имя и название комнаты — друг вводит то же самое</p>
+  <input id="n" placeholder="Твоё имя" maxlength="20">
+  <input id="r" placeholder="Название комнаты" maxlength="30">
+  <button id="btn1">Войти в чат →</button>
+</div>
+
+<div id="chat">
+  <div style="background:#18181f;border-bottom:1px solid #2a2a36;padding:12px 16px;display:flex;align-items:center;gap:10px">
+    <div style="width:36px;height:36px;border-radius:50%;background:#7c6af7;display:flex;align-items:center;justify-content:center">🏠</div>
+    <div>
+      <div id="rtitle" style="font-weight:600;font-size:16px"></div>
+      <div id="status" style="font-size:12px;color:#a99ef9"></div>
+    </div>
+  </div>
+  <div id="msgs"></div>
+  <div class="bar">
+    <button class="ibtn" id="photoBtn">📷</button>
+    <textarea id="txt" placeholder="Написать..." rows="1"></textarea>
+    <button id="btn2">➤</button>
+  </div>
+  <input type="file" id="fileIn" accept="image/*">
+</div>
+
+<div id="lb">
+  <button id="lbx">✕</button>
+  <img id="lbImg" src="">
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+<script>
+var FC = null;
+try { var s = localStorage.getItem('fc'); if(s) FC = JSON.parse(s); } catch(e) {}
+
+var myName='', myRoom='', db=null, ref=null, fbOk=false;
+var typingTimer=null, lastTyping=0, leaveTimer=null;
+
+function $(id) { return document.getElementById(id); }
+
+function initFB(cfg) {
+  try {
+    var app = firebase.initializeApp(cfg, 'a'+Date.now());
+    db = firebase.database(app);
+    fbOk = true;
+    return true;
+  } catch(e) { return false; }
+}
+
+$('btn1').onclick = function() {
+  var n = $('n').value.trim();
+  var r = $('r').value.trim().replace(/\s+/g,'-').toLowerCase();
+  if (!n) { alert('Введи имя'); return; }
+  if (!r) { alert('Введи название комнаты'); return; }
+  myName = n; myRoom = r;
+  $('setup').style.display = 'none';
+  $('chat').style.display = 'flex';
+  $('rtitle').textContent = '# ' + r;
+
+  if (FC && initFB(FC)) {
+    startChat();
+  } else {
+    var cfg = prompt('Вставь Firebase конфигурацию (от { до }):');
+    if (cfg) {
+      try {
+        var parsed = JSON.parse(cfg);
+        localStorage.setItem('fc', JSON.stringify(parsed));
+        FC = parsed;
+        if (initFB(parsed)) startChat();
+        else alert('Ошибка подключения');
+      } catch(e) { alert('Неверный формат'); }
+    } else {
+      $('status').textContent = '⚠️ Демо-режим';
+      addMsg({ sys: true, text: 'Демо-режим. Подключи Firebase для общения.' });
+    }
+  }
+};
+
+function startChat() {
+  $('status').textContent = '🟢 онлайн';
+  $('msgs').innerHTML = '';
+  ref = db.ref('r/' + myRoom + '/m');
+  ref.on('child_added', function(s) { var m = s.val(); if(m) addMsg(m); });
+
+  db.ref('r/' + myRoom + '/t').on('value', function(s) {
+    var d = s.val() || {};
+    var others = Object.keys(d).filter(function(k) { return k !== myName && Date.now() - d[k] < 4000; });
+    $('status').textContent = others.length ? others[0] + ' печатает...' : '🟢 онлайн';
+  });
+
+  // сообщение о входе
+  ref.push({ sys: true, text: myName + ' вошёл в чат', ts: firebase.database.ServerValue.TIMESTAMP });
+
+  // отслеживание ухода
+  setupPresence();
+}
+
+function setupPresence() {
+  var presRef = db.ref('r/' + myRoom + '/p/' + myName);
+  presRef.set(Date.now());
+
+  // когда вкладка скрывается — таймер на выход
+  document.addEventListener('visibilitychange', function() {
+    if (document.hidden) {
+      leaveTimer = setTimeout(function() {
+        presRef.remove();
+        ref.push({ sys: true, text: myName + ' вышел из чата', ts: firebase.database.ServerValue.TIMESTAMP });
+      }, 20000);
+    } else {
+      clearTimeout(leaveTimer);
+      presRef.set(Date.now());
+    }
+  });
+
+  // когда закрывает страницу
+  window.addEventListener('beforeunload', function() {
+    ref.push({ sys: true, text: myName + ' вышел из чата', ts: firebase.database.ServerValue.TIMESTAMP });
+    presRef.remove();
+  });
+}
+
+function addMsg(m) {
+  var w = $('msgs');
+  var el = document.createElement('div');
+
+  if (m.sys) {
+    el.className = 'bubble sys';
+    el.textContent = m.text;
+  } else {
+    var isMe = m.from === myName;
+    el.style.display = 'flex';
+    el.style.flexDirection = 'column';
+    el.style.alignItems = isMe ? 'flex-end' : 'flex-start';
+
+    if (!isMe) {
+      var nm = document.createElement('div');
+      nm.className = 'name';
+      nm.textContent = m.from;
+      el.appendChild(nm);
+    }
+
+    if (m.type === 'image') {
+      var ib = document.createElement('div');
+      ib.className = 'img-bubble ' + (isMe ? 'out' : 'in');
+      var img = document.createElement('img');
+      img.src = m.data;
+      img.loading = 'lazy';
+      img.onclick = function() { openLB(this.src); };
+      ib.appendChild(img);
+      el.appendChild(ib);
+    } else {
+      var b = document.createElement('div');
+      b.className = 'bubble ' + (isMe ? 'out' : 'in');
+      b.textContent = m.text;
+      el.appendChild(b);
+    }
+  }
+
+  w.appendChild(el);
+  w.scrollTop = w.scrollHeight;
+}
+
+function send() {
+  var txt = $('txt').value.trim();
+  if (!txt) return;
+  $('txt').value = '';
+  $('txt').style.height = 'auto';
+  var msg = { from: myName, text: txt, ts: fbOk ? firebase.database.ServerValue.TIMESTAMP : Date.now() };
+  if (fbOk && ref) {
+    ref.push(msg);
+    db.ref('r/' + myRoom + '/t/' + myName).remove();
+  } else {
+    addMsg(msg);
+  }
+}
+
+$('btn2').onclick = send;
+
+$('photoBtn').onclick = function() { $('fileIn').click(); };
+
+$('fileIn').onchange = function() {
+  var file = this.files[0];
+  if (!file) return;
+  this.value = '';
+  if (file.size > 800 * 1024) { alert('Фото слишком большое. До 800 КБ.'); return; }
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    var msg = { from: myName, type: 'image', data: e.target.result, ts: fbOk ? firebase.database.ServerValue.TIMESTAMP : Date.now() };
+    if (fbOk && ref) ref.push(msg);
+    else addMsg(msg);
+  };
+  reader.readAsDataURL(file);
+};
+
+$('lbx').onclick = function() { $('lb').classList.remove('open'); };
+function openLB(src) { $('lbImg').src = src; $('lb').classList.add('open'); }
+
+$('txt').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+});
+
+$('txt').addEventListener('input', function() {
+  this.style.height = 'auto';
+  this.style.height = Math.min(this.scrollHeight, 100) + 'px';
+  if (!fbOk) return;
+  var now = Date.now();
+  if (now - lastTyping > 2000) {
+    lastTyping = now;
+    db.ref('r/' + myRoom + '/t/' + myName).set(now);
+  }
+  clearTimeout(typingTimer);
+  typingTimer = setTimeout(function() {
+    db.ref('r/' + myRoom + '/t/' + myName).remove();
+  }, 3000);
+});
+</script>
+</body>
+</html>
